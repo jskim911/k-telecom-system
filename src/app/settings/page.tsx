@@ -184,12 +184,12 @@ export default function SettingsPage() {
 
     return (
         <DashboardLayout>
-            <div className="text-sm text-gray-500 mb-2">🏠 홈 / <span className="text-gray-800 font-medium">Settings</span></div>
+            <div className="text-sm text-gray-500 mb-2">🏠 홈 / <span className="text-gray-800 font-medium">기본정보</span></div>
 
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-800">기준 정보 관리</h1>
-                    <p className="text-sm text-gray-500">프로젝트 기본 정보 및 참여 인력 관리</p>
+                    <h1 className="text-2xl font-bold text-gray-800">기본정보 관리</h1>
+                    <p className="text-sm text-gray-500">프로젝트 기본정보 및 참여 인력 관리</p>
                 </div>
                 {saved && <span className="text-sm text-green-600 font-medium animate-pulse">✅ 저장 완료!</span>}
             </div>

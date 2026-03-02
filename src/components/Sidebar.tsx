@@ -13,7 +13,7 @@ const menuItems = [
     { label: '품질/검측', icon: '🔍', href: '/quality' },
     { label: '안전 관리', icon: '⚠️', href: '/safety' },
     { label: '문서 관리', icon: '📁', href: '/documents' },
-    { label: '기준 정보', icon: '⚙️', href: '/settings' },
+    { label: '기본정보', icon: '⚙️', href: '/settings' },
 ];
 
 export default function Sidebar() {
