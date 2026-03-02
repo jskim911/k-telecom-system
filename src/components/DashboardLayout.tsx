@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Sidebar from '@/components/Sidebar';
+import AiAssistant from '@/components/AiAssistant';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 
@@ -28,6 +29,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <main className="ml-[240px] flex-1 p-8">
                 {children}
             </main>
+            <AiAssistant />
         </div>
     );
 }
