@@ -3,7 +3,21 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { db } from '@/lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
+import Link from 'next/link';
+
+interface ProcessItem {
+    id: string;
+    name: string;
+    weight: number;
+}
+
+interface JobOrder {
+    id: string;
+    processId: string;
+    rate: number;
+    status: string;
+}
 
 interface ProjectInfo {
     projectName: string;
@@ -13,194 +27,222 @@ interface ProjectInfo {
     startDate: string;
     endDate: string;
     budget: string;
-    address: string;
 }
 
-const kpiCards = [
-    { icon: '📊', label: '전체 공정률', value: '14%', sub: '', color: 'bg-blue-50 text-blue-600', hasBar: true, barWidth: '14%' },
-    { icon: '⏳', label: '대기중인 검측', value: '1건', sub: '승인 대기 중', color: 'bg-yellow-50 text-yellow-600', hasBar: false, barWidth: '' },
-    { icon: '🔺', label: '지연 공정', value: '1건', sub: '조치 필요', color: 'bg-red-50 text-red-600', hasBar: false, barWidth: '' },
-    { icon: '✅', label: '금주 완료 예정', value: '2건', sub: '정상 진행 중', color: 'bg-green-50 text-green-600', hasBar: false, barWidth: '' },
-];
+interface Transmittal {
+    id: string;
+    docNo: string;
+    title: string;
+    status: string;
+    createdAt: any;
+}
 
-const scheduleItems = [
-    { wbs: 'WBS-100', name: '기반 시설 공사 (전체)', rate: 92, period: '2024-03-01 ~ 2024-04-10', status: 'In Progress' },
-    { wbs: 'WBS-101', name: '현장 사무소 개설 및 인허가', rate: 100, period: '2024-03-01 ~ 2024-03-15', status: 'Completed' },
-    { wbs: 'WBS-102', name: '기초 맨홀 터파기 및 관로 포설', rate: 85, period: '2024-03-16 ~ 2024-04-10', status: 'In Progress' },
-    { wbs: 'WBS-200', name: '통신 설비 구축 (전체)', rate: 13, period: '2024-04-05 ~ 2024-04-30', status: 'In Progress' },
-];
-
-const inspectionItems = [
-    { name: '자재 검수', location: '현장 자재 창고 | 감리단장', date: '2024-03-28', status: 'Approved' },
-    { name: '관로 매설 깊이 검측', location: 'A구역 2번 맨홀 | 김감리', date: '2024-04-02', status: 'Rejected' },
-    { name: '통신 랙 접지 저항 측정', location: 'MDF실 | 이감리', date: '2024-04-05', status: 'Pending' },
-];
+interface ResourceCounts {
+    inspectors: number;
+    clients: number;
+    contractors: number;
+}
 
 function StatusBadge({ status }: { status: string }) {
     const styles: Record<string, string> = {
         'In Progress': 'bg-blue-100 text-blue-700',
         'Completed': 'bg-green-100 text-green-700',
+        'Approved': 'bg-emerald-100 text-emerald-700',
+        'Pending': 'bg-orange-100 text-orange-700',
+        'Rejected': 'bg-red-100 text-red-700',
         'Delayed': 'bg-red-100 text-red-700',
-        'Approved': 'text-green-600',
-        'Rejected': 'text-red-600',
-        'Pending': 'text-yellow-600',
     };
-    return <span className={`text-xs font-semibold px-2 py-1 rounded-full ${styles[status] || 'bg-gray-100'}`}>{status}</span>;
-}
-
-function getDaysLeft(endDate: string): number {
-    if (!endDate) return 0;
-    const end = new Date(endDate);
-    const today = new Date();
-    return Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-function getElapsedPercent(startDate: string, endDate: string): number {
-    if (!startDate || !endDate) return 0;
-    const start = new Date(startDate).getTime();
-    const end = new Date(endDate).getTime();
-    const now = Date.now();
-    if (now >= end) return 100;
-    if (now <= start) return 0;
-    return Math.round(((now - start) / (end - start)) * 100);
+    return <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md border ${styles[status] || 'bg-gray-100'}`}>{status}</span>;
 }
 
 export default function DashboardPage() {
     const [project, setProject] = useState<ProjectInfo | null>(null);
+    const [processes, setProcesses] = useState<ProcessItem[]>([]);
+    const [jobs, setJobs] = useState<JobOrder[]>([]);
+    const [transmittals, setTransmittals] = useState<Transmittal[]>([]);
+    const [resourceCounts, setResourceCounts] = useState<ResourceCounts>({ inspectors: 0, clients: 0, contractors: 0 });
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const unsub = onSnapshot(doc(db, 'settings', 'project'), (snap) => {
-            if (snap.exists() && snap.data().project) {
-                setProject(snap.data().project as ProjectInfo);
+        // 1. 프로젝트 기본 정보 및 인력 카운트
+        const unsubProject = onSnapshot(doc(db, 'settings', 'project'), (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.project) setProject(data.project as ProjectInfo);
+                setResourceCounts({
+                    inspectors: data.inspectors?.length || 0,
+                    clients: data.clients?.length || 0,
+                    contractors: data.contractors?.length || 0,
+                });
             }
         });
-        return () => unsub();
+
+        // 2. 공정 아이템
+        const unsubProc = onSnapshot(collection(db, 'process_items'), (snap) => {
+            setProcesses(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProcessItem)));
+        });
+
+        // 3. 작업지시서
+        const unsubJobs = onSnapshot(collection(db, 'job_orders'), (snap) => {
+            setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobOrder)));
+        });
+
+        // 4. 최근 수발송 (5건)
+        const qTrans = query(collection(db, 'transmittals'), orderBy('createdAt', 'desc'), limit(5));
+        const unsubTrans = onSnapshot(qTrans, (snap) => {
+            setTransmittals(snap.docs.map(d => ({ id: d.id, ...d.data() } as Transmittal)));
+            setLoading(false);
+        });
+
+        return () => {
+            unsubProject();
+            unsubProc();
+            unsubJobs();
+            unsubTrans();
+        };
     }, []);
 
-    const daysLeft = project ? getDaysLeft(project.endDate) : 0;
-    const elapsed = project ? getElapsedPercent(project.startDate, project.endDate) : 0;
+    // 집계 로직
+    const processProgressMap = processes.map(proc => {
+        const linkedJobs = jobs.filter(j => j.processId === proc.id);
+        const avgRate = linkedJobs.length > 0 
+            ? linkedJobs.reduce((acc, j) => acc + (j.rate || 0), 0) / linkedJobs.length 
+            : 0;
+        return { ...proc, avgRate: Math.round(avgRate * 10) / 10 };
+    });
+
+    const totalWeightedProgress = Math.round(
+        processProgressMap.reduce((acc, proc) => acc + (proc.avgRate * (proc.weight || 0) / 100), 0)
+    );
+
+    const pendingApprovals = transmittals.filter(t => t.status === 'Pending').length;
 
     return (
         <DashboardLayout>
             {/* Breadcrumb */}
-            <div className="text-sm text-gray-500 mb-4">🏠 홈 / <span className="text-gray-800 font-medium">Dashboard</span></div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-6">Main / Dashboard</div>
 
-            {/* 프로젝트 기본정보 배너 */}
-            {project && (
-                <div className="bg-gradient-to-r from-[#1E3A5F] to-[#2563EB] rounded-2xl shadow-lg p-5 mb-6 text-white relative overflow-hidden">
-                    {/* 배경 패턴 */}
-                    <div className="absolute top-0 right-0 w-60 h-60 bg-white/5 rounded-full -translate-y-20 translate-x-20"></div>
-                    <div className="absolute bottom-0 left-40 w-32 h-32 bg-white/5 rounded-full translate-y-16"></div>
-
-                    <div className="relative z-10">
-                        <div className="flex items-start justify-between mb-3">
-                            <div>
-                                <p className="text-blue-200 text-xs font-medium mb-1">📋 프로젝트</p>
-                                <h2 className="text-xl font-bold">{project.projectName}</h2>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-blue-200 text-xs">공사 잔여일</p>
-                                <p className="text-2xl font-bold">{daysLeft > 0 ? `D-${daysLeft}` : '완료'}</p>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+                {/* 1. 개인 업무 대시보드 (My Tasks) */}
+                <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white shadow-2xl shadow-indigo-100 relative overflow-hidden">
+                        <div className="relative z-10">
+                            <h2 className="text-3xl font-black mb-2">오늘의 업무 현황</h2>
+                            <p className="text-indigo-100 font-medium">검토 및 승인이 필요한 문서가 <span className="text-white font-black underline decoration-2 underline-offset-4">{pendingApprovals}건</span> 있습니다.</p>
+                            
+                            <div className="flex gap-4 mt-8">
+                                <Link href="/documents" className="bg-white text-indigo-600 px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:scale-105 transition shadow-lg">결재 센터 바로가기</Link>
+                                <Link href="/schedule" className="bg-indigo-500/50 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-500 transition border border-indigo-400">현장 관리</Link>
                             </div>
                         </div>
+                        <div className="absolute right-0 bottom-0 p-10 opacity-10 text-[160px] font-black italic select-none leading-none translate-y-20 translate-x-10">TASK</div>
+                    </div>
 
-                        {/* 공기 진행률 바 */}
-                        <div className="mb-4">
-                            <div className="flex justify-between text-xs text-blue-200 mb-1">
-                                <span>{project.startDate}</span>
-                                <span>공기 진행률 {elapsed}%</span>
-                                <span>{project.endDate}</span>
-                            </div>
-                            <div className="w-full bg-white/20 rounded-full h-2">
-                                <div className="bg-white h-2 rounded-full transition-all" style={{ width: `${elapsed}%` }}></div>
-                            </div>
-                        </div>
-
-                        {/* 핵심 정보 그리드 */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            <div className="bg-white/10 rounded-lg px-3 py-2">
-                                <p className="text-[10px] text-blue-200">발주처</p>
-                                <p className="text-sm font-semibold truncate">{project.client}</p>
-                            </div>
-                            <div className="bg-white/10 rounded-lg px-3 py-2">
-                                <p className="text-[10px] text-blue-200">시공사</p>
-                                <p className="text-sm font-semibold truncate">{project.contractor}</p>
-                            </div>
-                            <div className="bg-white/10 rounded-lg px-3 py-2">
-                                <p className="text-[10px] text-blue-200">감리사</p>
-                                <p className="text-sm font-semibold truncate">{project.supervisor}</p>
-                            </div>
-                            <div className="bg-white/10 rounded-lg px-3 py-2">
-                                <p className="text-[10px] text-blue-200">공사 금액</p>
-                                <p className="text-sm font-semibold truncate">{project.budget}</p>
-                            </div>
-                        </div>
+                    {/* 2. 퀵 액션 섹션 */}
+                    <div className="grid grid-cols-3 gap-4">
+                        {[
+                            { title: '작업발행', desc: '신규 지시서', icon: '📝', href: '/schedule' },
+                            { title: '결재상신', desc: '공문/보고서', icon: '🖋️', href: '/documents' },
+                            { title: '양식작성', desc: '품질/안전', icon: '📁', href: '/forms' },
+                        ].map((action, i) => (
+                            <Link href={action.href} key={i} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-xl transition-all group">
+                                <div className="text-2xl mb-3 group-hover:scale-110 transition">{action.icon}</div>
+                                <h3 className="text-sm font-black text-gray-800">{action.title}</h3>
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">{action.desc}</p>
+                            </Link>
+                        ))}
                     </div>
                 </div>
-            )}
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                {kpiCards.map((card, i) => (
-                    <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className={`w-10 h-10 flex items-center justify-center rounded-lg text-xl ${card.color}`}>{card.icon}</span>
-                            <span className="text-xs text-gray-400 font-medium">{card.label}</span>
+                {/* 3. 프로젝트 요약 & 인원 위젯 */}
+                <div className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm flex flex-col justify-between">
+                    <div>
+                        <h2 className="text-lg font-black text-gray-800 mb-6 flex items-center justify-between">
+                            Project Resources
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        </h2>
+                        <div className="space-y-4">
+                            {[
+                                { label: '감리단', count: resourceCounts.inspectors, bg: 'bg-blue-50', text: 'text-blue-600' },
+                                { label: '발주처', count: resourceCounts.clients, bg: 'bg-indigo-50', text: 'text-indigo-600' },
+                                { label: '시공사', count: resourceCounts.contractors, bg: 'bg-slate-50', text: 'text-slate-600' },
+                            ].map((res, i) => (
+                                <div key={i} className="flex items-center justify-between p-4 rounded-3xl bg-gray-50/50 border border-transparent hover:border-gray-200 transition">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-10 h-10 rounded-2xl ${res.bg} ${res.text} flex items-center justify-center font-black`}>{res.label[0]}</div>
+                                        <span className="text-xs font-black text-gray-600">{res.label}</span>
+                                    </div>
+                                    <span className="text-sm font-black text-gray-800">{res.count}명</span>
+                                </div>
+                            ))}
                         </div>
-                        <p className="text-3xl font-bold text-gray-800">{card.value}</p>
-                        {card.hasBar && (
-                            <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                                <div className="bg-blue-600 h-2 rounded-full" style={{ width: card.barWidth }}></div>
-                            </div>
-                        )}
-                        {card.sub && <p className="text-xs text-gray-400 mt-1">{card.sub}</p>}
                     </div>
-                ))}
+                    <Link href="/settings" className="mt-8 text-center text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-indigo-600 transition">관계자 정보 관리 ↗</Link>
+                </div>
             </div>
 
-            {/* Bottom Grid: Schedule + Inspection */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* 주요 공정 현황 */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                    <h2 className="text-lg font-bold text-gray-800 mb-4">주요 공정 현황</h2>
-                    <div className="space-y-4">
-                        {scheduleItems.map((item, i) => (
-                            <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono">{item.wbs}</span>
-                                    <div>
-                                        <p className="text-sm font-semibold text-gray-700">{item.name}</p>
-                                        <p className="text-xs text-gray-400">{item.period}</p>
+            {/* Bottom Grid: Progress + Recent Logistics */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* 4. 가중치 기반 공정 현황 (시각화 강화) */}
+                <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm relative overflow-hidden">
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <h2 className="text-xl font-black text-gray-800">공정별 진도 분석</h2>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">Weighted Progress Matrix</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-3xl font-black text-indigo-600">{totalWeightedProgress}%</p>
+                            <p className="text-[10px] text-gray-400 font-black uppercase">Total Weighted</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6">
+                        {processProgressMap.map((item, i) => (
+                            <div key={i} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-0.5 rounded uppercase tracking-tighter">W: {item.weight}%</span>
+                                        <span className="text-sm font-black text-gray-700">{item.name}</span>
                                     </div>
+                                    <span className="text-xs font-black text-indigo-600">{item.avgRate}%</span>
                                 </div>
-                                <div className="text-right flex items-center gap-2">
-                                    <span className="text-sm font-bold text-gray-700">{item.rate}%</span>
-                                    <StatusBadge status={item.status} />
+                                <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                                    <div 
+                                        className="h-full bg-indigo-600 rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
+                                        style={{ width: `${item.avgRate}%` }}
+                                    ></div>
                                 </div>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                {/* 최근 품질 검측 요청 */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                    <h2 className="text-lg font-bold text-gray-800 mb-4">최근 품질 검측 요청</h2>
+                {/* 5. 최근 수발송 이력 (Recent Transmittals) */}
+                <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <h2 className="text-xl font-black text-gray-800">최근 행정 업무</h2>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">Latest Transmittals</p>
+                        </div>
+                        <Link href="/documents" className="text-[10px] font-black uppercase text-indigo-600 hover:underline">View All</Link>
+                    </div>
+
                     <div className="space-y-4">
-                        {inspectionItems.map((item, i) => (
-                            <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                                <div className="flex items-center gap-2">
-                                    <span className={`w-2.5 h-2.5 rounded-full ${item.status === 'Approved' ? 'bg-green-500' : item.status === 'Rejected' ? 'bg-red-500' : 'bg-yellow-500'}`}></span>
+                        {transmittals.map((t, i) => (
+                            <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-3xl border border-transparent hover:border-gray-100 transition cursor-pointer group">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-lg shadow-sm group-hover:scale-105 transition">📄</div>
                                     <div>
-                                        <p className="text-sm font-semibold text-gray-700">{item.name}</p>
-                                        <p className="text-xs text-gray-400">{item.location}</p>
+                                        <h4 className="text-sm font-black text-gray-700 truncate max-w-[150px]">{t.title}</h4>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">{t.docNo}</p>
                                     </div>
                                 </div>
-                                <div className="text-right">
-                                    <p className="text-xs text-gray-400">{item.date}</p>
-                                    <StatusBadge status={item.status} />
-                                </div>
+                                <StatusBadge status={t.status} />
                             </div>
                         ))}
+                        {transmittals.length === 0 && (
+                            <div className="text-center py-20 text-gray-300 font-black uppercase text-xs tracking-widest">No Recent Data</div>
+                        )}
                     </div>
                 </div>
             </div>

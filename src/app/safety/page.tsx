@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
+import GDocDynamicModal from '@/components/GDocDynamicModal'; // 추가
 import { db } from '@/lib/firebase';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 interface SafetyLog {
     id: string;
@@ -13,6 +15,7 @@ interface SafetyLog {
     risk: string;
     status: string;
     manager: string;
+    gdocUrl?: string;
 }
 
 const defaultRiskItems = [
@@ -43,20 +46,29 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function SafetyPage() {
     const [logs, setLogs] = useState<SafetyLog[]>([]);
-    const [showModal, setShowModal] = useState(false);
+    const [showGDocModal, setShowGDocModal] = useState(false);
     const [loading, setLoading] = useState(true);
-
-    // Form
-    const [formDate, setFormDate] = useState('');
-    const [formType, setFormType] = useState('TBM');
-    const [formContent, setFormContent] = useState('');
-    const [formRisk, setFormRisk] = useState('Low');
-    const [formStatus, setFormStatus] = useState('Safe');
-    const [formManager, setFormManager] = useState('');
+    const [selectedLog, setSelectedLog] = useState<SafetyLog | null>(null);
+    const [gdocForceGenerate, setGDocForceGenerate] = useState(false);
 
     const colRef = collection(db, 'safetyLogs');
 
     useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const searchParams = new URLSearchParams(window.location.search);
+            const wbs = searchParams.get('wbs');
+            if (wbs) {
+                const name = searchParams.get('name') || '';
+                const loc = searchParams.get('location') || '';
+                
+                // 신규 작성을 위해 모달 오픈
+                setSelectedLog(null);
+                setGDocForceGenerate(false);
+                setShowGDocModal(true);
+                window.history.replaceState(null, '', '/safety');
+            }
+        }
+
         const q = query(colRef, orderBy('date', 'desc'));
         const unsub = onSnapshot(q, (snap) => {
             if (snap.empty) {
@@ -67,19 +79,7 @@ export default function SafetyPage() {
             setLoading(false);
         });
         return () => unsub();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-
-    const handleAdd = async () => {
-        if (!formDate || !formContent || !formManager) return alert('필수 항목을 입력하세요.');
-        await addDoc(colRef, {
-            date: formDate, type: formType, content: formContent,
-            risk: formRisk, status: formStatus, manager: formManager,
-        });
-        setShowModal(false);
-        setFormDate(''); setFormType('TBM'); setFormContent('');
-        setFormRisk('Low'); setFormStatus('Safe'); setFormManager('');
-    };
 
     const handleDelete = async (log: SafetyLog) => {
         if (!confirm(`"${log.content}" 활동 기록을 삭제하시겠습니까?`)) return;
@@ -88,33 +88,35 @@ export default function SafetyPage() {
 
     return (
         <DashboardLayout>
-            <div className="text-sm text-gray-500 mb-2">🏠 홈 / <span className="text-gray-800 font-medium">Safety</span></div>
+            <div className="text-sm text-gray-500 mb-2">
+                <Link href="/" className="hover:text-blue-600 transition-colors">🏠 홈</Link> / <span className="text-gray-800 font-medium">Safety</span>
+            </div>
 
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">안전 관리</h1>
                     <p className="text-sm text-gray-500">현장 위험성 평가(TBM) 및 안전 점검 현황</p>
                 </div>
-                <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition shadow-sm">📋 안전 일지 작성</button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => { setSelectedLog(null); setGDocForceGenerate(false); setShowGDocModal(true); }} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition shadow-sm">📋 안전 일지 작성</button>
+                </div>
             </div>
 
-            {/* 무재해 달성 배너 */}
-            <div className="bg-gradient-to-r from-emerald-800 to-emerald-600 text-white rounded-xl p-6 mb-6 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-emerald-800 to-emerald-600 text-white rounded-xl p-6 mb-6 flex items-center justify-between shadow-lg shadow-emerald-100">
                 <div className="flex items-center gap-4">
-                    <span className="text-4xl">🛡️</span>
+                    <span className="text-4xl text-white/90">🛡️</span>
                     <div>
                         <p className="text-sm opacity-80">무재해 달성일수</p>
-                        <p className="text-4xl font-bold">124 <span className="text-lg font-normal">일째</span></p>
+                        <p className="text-4xl font-black tracking-tight">124 <span className="text-lg font-normal">일째</span></p>
                     </div>
                 </div>
-                <div className="text-right">
+                <div className="text-right hidden sm:block border-l border-white/20 pl-6">
                     <p className="text-sm opacity-80">최근 안전사고</p>
-                    <p className="text-lg font-semibold">없음 (준공 예정일 D-50)</p>
+                    <p className="text-lg font-bold">없음 (공사 준공 D-50)</p>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                {/* 금일 위험 작업 현황 */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                     <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">⚠️ 금일 위험 작업 현황</h2>
                     <div className="space-y-3">
@@ -130,7 +132,6 @@ export default function SafetyPage() {
                     </div>
                 </div>
 
-                {/* 최근 안전 활동 내역 */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-bold text-gray-800">최근 안전 활동 내역</h2>
@@ -147,22 +148,58 @@ export default function SafetyPage() {
                                     <th className="py-2 text-center">위험등급</th>
                                     <th className="py-2 text-center">상태</th>
                                     <th className="py-2 text-right">담당자</th>
+                                    <th className="py-2 text-center w-24">출력</th>
                                     <th className="py-2 text-right w-8"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {logs.map((row) => (
-                                    <tr key={row.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                    <tr 
+                                        key={row.id} 
+                                        className="border-b border-gray-50 hover:bg-gray-50/50 transition cursor-pointer"
+                                        onClick={() => { setSelectedLog(row); setGDocForceGenerate(false); setShowGDocModal(true); }}
+                                    >
                                         <td className="py-3">
-                                            <p className="font-medium text-gray-700">{row.date}</p>
-                                            <p className="text-xs text-gray-400">{row.type}</p>
+                                            <p className="font-medium text-gray-700 text-xs">{row.date}</p>
+                                            <p className="text-[10px] text-gray-400">{row.type}</p>
                                         </td>
                                         <td className="py-3 text-gray-600 text-xs">{row.content}</td>
                                         <td className="py-3 text-center"><RiskBadge level={row.risk} /></td>
                                         <td className="py-3 text-center"><StatusBadge status={row.status} /></td>
-                                        <td className="py-3 text-right text-gray-600">{row.manager}</td>
+                                        <td className="py-3 text-right text-xs text-gray-600 font-medium">{row.manager}</td>
+                                        <td className="py-3 px-2 text-center">
+                                            <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                                {row.gdocUrl ? (
+                                                    <>
+                                                        <a 
+                                                            href={row.gdocUrl} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            title="독스 열기"
+                                                            className="p-1 bg-green-50 text-green-600 rounded border border-green-100 hover:bg-green-100 transition shadow-sm text-xs"
+                                                        >
+                                                            🌐
+                                                        </a>
+                                                        <a 
+                                                            href={`https://docs.google.com/document/d/${row.gdocUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1]}/export?format=pdf`}
+                                                            title="PDF 다운로드"
+                                                            className="p-1 bg-red-50 text-red-600 rounded border border-red-100 hover:bg-red-100 transition shadow-sm text-xs"
+                                                        >
+                                                            📥
+                                                        </a>
+                                                    </>
+                                                ) : (
+                                                    <button 
+                                                        onClick={() => { setSelectedLog(row); setGDocForceGenerate(true); setShowGDocModal(true); }}
+                                                        className="text-[10px] px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-bold shadow-sm"
+                                                    >
+                                                        📄 출력
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
                                         <td className="py-3 text-right">
-                                            <button onClick={() => handleDelete(row)} className="text-xs text-red-400 hover:text-red-600">✕</button>
+                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(row); }} className="text-xs text-red-300 hover:text-red-500 transition">✕</button>
                                         </td>
                                     </tr>
                                 ))}
@@ -172,67 +209,40 @@ export default function SafetyPage() {
                 </div>
             </div>
 
-            {/* 이달의 안전 캠페인 */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h2 className="text-lg font-bold text-gray-800 mb-4">이달의 안전 캠페인</h2>
-                <div className="flex items-center gap-6">
-                    <span className="text-6xl">🦺</span>
-                    <div>
-                        <p className="text-xl font-bold text-gray-800">개인보호구 착용 철저</p>
-                        <p className="text-sm text-gray-500 mt-1">모든 현장 출입 시 안전모, 안전화, 안전조끼를 반드시 착용하세요.</p>
-                        <p className="text-sm text-gray-500">밀폐공간 진입 시 산소농도 측정기를 반드시 휴대하세요.</p>
-                    </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 flex items-center gap-8 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-5 text-8xl">🦺</div>
+                <span className="text-7xl">🦺</span>
+                <div>
+                    <p className="text-xs font-bold text-red-500 uppercase tracking-widest mb-1">Safety Campaign</p>
+                    <p className="text-2xl font-black text-gray-900 mb-2">개인보호구 착용 철저</p>
+                    <p className="text-sm text-gray-500 leading-relaxed max-w-lg">모든 현장 출입 시 안전모, 안전화, 안전조끼를 반드시 착용하세요. 밀폐공간 진입 시 산소농도 측정기를 반드시 휴대해야 합니다.</p>
                 </div>
             </div>
 
-            {/* 안전 일지 작성 모달 */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center">
-                    <div className="bg-white rounded-2xl shadow-2xl w-[520px] p-6">
-                        <h2 className="text-lg font-bold text-gray-800 mb-4">📋 안전 일지 작성</h2>
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">일자</label>
-                                    <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">담당자</label>
-                                    <input value={formManager} onChange={(e) => setFormManager(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="홍길동" />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">활동 내용</label>
-                                <textarea value={formContent} onChange={(e) => setFormContent(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 resize-none" placeholder="안전 점검 내용을 입력하세요" />
-                            </div>
-                            <div className="grid grid-cols-3 gap-3">
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">유형</label>
-                                    <select value={formType} onChange={(e) => setFormType(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                                        {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">위험등급</label>
-                                    <select value={formRisk} onChange={(e) => setFormRisk(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                                        {riskOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">처리 상태</label>
-                                    <select value={formStatus} onChange={(e) => setFormStatus(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                                        {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex gap-2 mt-6">
-                            <button onClick={() => setShowModal(false)} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 transition">취소</button>
-                            <button onClick={handleAdd} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition">일지 등록</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* 구글 독스 모달 */}
+            <GDocDynamicModal 
+                isOpen={showGDocModal} 
+                onClose={() => setShowGDocModal(false)}
+                prefillData={selectedLog ? {
+                    date: selectedLog.date,
+                    type: selectedLog.type,
+                    content: selectedLog.content,
+                    risk: selectedLog.risk,
+                    status: selectedLog.status,
+                    manager: selectedLog.manager
+                } : undefined}
+                onSave={async (data) => {
+                    if (selectedLog) {
+                        const { gdocUrl, ...rest } = data;
+                        await updateDoc(doc(db, 'safetyLogs', selectedLog.id), {
+                            ...rest,
+                            gdocUrl: gdocUrl || null,
+                        });
+                    }
+                }}
+                documentType="safety"
+                forceGenerate={gdocForceGenerate}
+            />
         </DashboardLayout>
     );
 }

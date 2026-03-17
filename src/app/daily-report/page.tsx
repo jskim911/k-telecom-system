@@ -1,151 +1,225 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
+import GDocDynamicModal from '@/components/GDocDynamicModal';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
-interface DailyReport {
-    id: string;
-    date: string;
-    weather: string;
-    taskContent: string;
-    personnel: string;
-    issues: string;
-    nextPlan: string;
-    status: string;
+interface SchemaField {
+    korean: string;
+    english: string;
+    type: string;
+    required: boolean;
+    label: string;
 }
 
-const weatherOptions = ['맑음', '흐림', '비', '눈', '안개'];
-const weatherIcons: Record<string, string> = { '맑음': '☀️', '흐림': '⛅', '비': '🌧️', '눈': '❄️', '안개': '🌫️' };
+interface Schema {
+    namespace: string;
+    title: string;
+    source_file: string;
+    fields: SchemaField[];
+}
+
+interface DailyReport {
+    id: string;
+    data: Record<string, any>;
+    createdAt: any;
+    gdocUrl?: string;
+}
 
 export default function DailyReportPage() {
     const [reports, setReports] = useState<DailyReport[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [editItem, setEditItem] = useState<DailyReport | null>(null);
+    const [showGDocModal, setShowGDocModal] = useState(false);
+    const [selectedReport, setSelectedReport] = useState<DailyReport | null>(null);
+    const [gdocForceGenerate, setGDocForceGenerate] = useState(false);
 
-    // Form
-    const [formDate, setFormDate] = useState('');
-    const [formWeather, setFormWeather] = useState('맑음');
-    const [formTask, setFormTask] = useState('');
-    const [formPersonnel, setFormPersonnel] = useState('');
-    const [formIssues, setFormIssues] = useState('');
-    const [formNext, setFormNext] = useState('');
+    // Schema
+    const [schema, setSchema] = useState<Schema | null>(null);
+
+    // Form - Dynamic
+    const [formData, setFormData] = useState<Record<string, any>>({});
 
     const colRef = collection(db, 'daily_reports');
 
+    // 스키마 로드 (기존 파이썬 서버 의존성 제거를 위해 기본 스키마 사용 또는 로컬 JSON 참조 권장)
+    const loadSchema = async () => {
+        try {
+            // 우선 기본 스키마로 폴백 설정
+            const defaultSchema: Schema = {
+                namespace: "daily_report",
+                title: "감리일보",
+                source_file: "감리일보_양식",
+                fields: [
+                    { korean: "일자", english: "date", type: "date", required: true, label: "보고 일자" },
+                    { korean: "공종", english: "work_type", type: "text", required: true, label: "주요 공종" },
+                    { korean: "작업위치", english: "location", type: "text", required: false, label: "작업 위치" },
+                    { korean: "작업자", english: "workers", type: "text", required: false, label: "당일 작업자" },
+                    { korean: "금일작업량", english: "work_qty", type: "text", required: false, label: "금일 작업량" },
+                    { korean: "기온", english: "temperature", type: "text", required: false, label: "현장 기온" },
+                    { korean: "비고", english: "notes", type: "textarea", required: false, label: "특이 사항" }
+                ]
+            };
+            setSchema(defaultSchema);
+            
+            // 향후 API가 준비되면 아래 코드 활성화 가능
+            // const res = await fetch('/api/schemas/daily_report');
+            // if (res.ok) { ... }
+        } catch (e) {
+            console.error("Schema load failed:", e);
+        }
+    };
+
     useEffect(() => {
-        const q = query(colRef, orderBy('date', 'desc'));
+        loadSchema();
+        if (typeof window !== 'undefined') {
+            const searchParams = new URLSearchParams(window.location.search);
+            const wbs = searchParams.get('wbs');
+            if (wbs) {
+                const name = searchParams.get('name') || '';
+                const loc = searchParams.get('location') || '';
+                const workers = searchParams.get('workers') || '';
+                const qty = searchParams.get('qty') || '';
+                
+                // 새로운 레코드를 바로 생성하거나, 혹은 모달에서 저장 시 생성되도록 함
+                // 여기선 우선 빈 레코드를 보여주거나 모달을 바로 띄움
+                setSelectedReport(null); // 신규 작성
+                setGDocForceGenerate(false);
+                setShowGDocModal(true);
+                window.history.replaceState(null, '', '/daily-report');
+            }
+        }
+
+        const q = query(colRef, orderBy('createdAt', 'desc'));
         const unsub = onSnapshot(q, (snap) => {
             setReports(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailyReport)));
             setLoading(false);
         });
         return () => unsub();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const resetForm = () => {
-        setFormDate(''); setFormWeather('맑음'); setFormTask('');
-        setFormPersonnel(''); setFormIssues(''); setFormNext('');
-        setEditItem(null);
-    };
-
-    const openAdd = () => { resetForm(); setShowModal(true); };
-
-    const openEdit = (r: DailyReport) => {
-        setEditItem(r);
-        setFormDate(r.date); setFormWeather(r.weather); setFormTask(r.taskContent);
-        setFormPersonnel(r.personnel); setFormIssues(r.issues || ''); setFormNext(r.nextPlan || '');
-        setShowModal(true);
-    };
-
-    const handleSave = async () => {
-        if (!formDate || !formTask) return alert('일자와 작업 내용은 필수입니다.');
-        const data = {
-            date: formDate, weather: formWeather, taskContent: formTask,
-            personnel: formPersonnel, issues: formIssues, nextPlan: formNext,
-            status: 'submitted',
-        };
-        if (editItem) {
-            await updateDoc(doc(db, 'daily_reports', editItem.id), data);
-        } else {
-            await addDoc(colRef, { ...data, createdAt: serverTimestamp() });
-        }
-        setShowModal(false);
-        resetForm();
-    };
-
     const handleDelete = async (r: DailyReport) => {
-        if (!confirm(`${r.date} 감리일보를 삭제하시겠습니까?`)) return;
+        if (!confirm(`해당 감리일보를 삭제하시겠습니까?`)) return;
         await deleteDoc(doc(db, 'daily_reports', r.id));
+    };
+
+    const getDisplayValue = (r: DailyReport, key: string) => {
+        const val = r.data?.[key];
+        if (key === 'work_type') {
+            const date = r.data?.['date'] || '-';
+            const loc = r.data?.['location'] || '-';
+            const type = r.data?.['work_type'] || '-';
+            return `${date} ${loc} ${type}`;
+        }
+        return val || '-';
+    };
+
+    const handleGDocSave = async (data: Record<string, any>) => {
+        try {
+            const { gdocUrl, ...rest } = data;
+            const payload = {
+                data: rest,
+                gdocUrl: gdocUrl || null,
+                updatedAt: serverTimestamp(),
+            };
+
+            if (selectedReport) {
+                await updateDoc(doc(db, 'daily_reports', selectedReport.id), payload);
+            } else {
+                await addDoc(colRef, { ...payload, createdAt: serverTimestamp() });
+            }
+        } catch (e) {
+            console.error("GDoc save to DB failed:", e);
+            alert("DB 저장 중 오류가 발생했습니다.");
+            throw e; // 모달에서도 에러를 인지하게 함
+        }
     };
 
     return (
         <DashboardLayout>
-            <div className="text-sm text-gray-500 mb-2">🏠 홈 / <span className="text-gray-800 font-medium">Daily Report</span></div>
+            <div className="text-sm text-gray-500 mb-2">
+                <Link href="/" className="hover:text-blue-600 transition-colors">🏠 홈</Link> / <span className="text-gray-800 font-medium">Daily Report</span>
+            </div>
 
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-800">감리일보</h1>
-                    <p className="text-sm text-gray-500">일일 현장 감리 보고서 작성 및 관리</p>
-                </div>
-                <button onClick={openAdd} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition shadow-sm">📝 감리일보 작성</button>
-            </div>
-
-            {/* 통계 카드 */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
-                    <p className="text-xs text-gray-400">총 작성 일보</p>
-                    <p className="text-2xl font-bold text-gray-800 mt-1">{reports.length}<span className="text-sm font-normal text-gray-400 ml-1">건</span></p>
-                </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
-                    <p className="text-xs text-gray-400">이번 달</p>
-                    <p className="text-2xl font-bold text-blue-600 mt-1">
-                        {reports.filter(r => r.date?.startsWith(new Date().toISOString().slice(0, 7))).length}
-                        <span className="text-sm font-normal text-gray-400 ml-1">건</span>
-                    </p>
-                </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
-                    <p className="text-xs text-gray-400">최근 작성일</p>
-                    <p className="text-lg font-bold text-gray-800 mt-1">{reports[0]?.date || '-'}</p>
+                    <h1 className="text-2xl font-bold text-gray-800">{schema?.title || '감리일보'}</h1>
+                    <p className="text-sm text-gray-500">일일 현장 감리 보고서 작성 및 관리 (항목을 클릭하여 작성/출력하세요)</p>
                 </div>
             </div>
 
-            {/* 일보 리스트 */}
             {loading ? (
                 <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
             ) : reports.length === 0 ? (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-16 text-center">
                     <p className="text-4xl mb-3">📋</p>
-                    <p className="text-gray-500 font-medium">작성된 감리일보가 없습니다.</p>
-                    <p className="text-sm text-gray-400 mt-1">위의 "감리일보 작성" 버튼을 클릭하여 첫 번째 일보를 작성하세요.</p>
+                    <p className="text-gray-500 font-medium">작성된 일보가 없습니다.</p>
+                    <p className="text-sm text-gray-400 mt-1">위의 버튼을 클릭하여 첫 번째 일보를 작성하세요.</p>
                 </div>
             ) : (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
                             <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
-                                <th className="py-3 px-4 text-left">일자</th>
-                                <th className="py-3 px-4 text-left">날씨</th>
-                                <th className="py-3 px-4 text-left">금일 작업 내용</th>
-                                <th className="py-3 px-4 text-left">투입 인력/장비</th>
-                                <th className="py-3 px-4 text-left">특이사항</th>
+                                <th className="py-3 px-4 text-left w-24">일자/기온</th>
+                                <th className="py-3 px-4 text-left">공종</th>
+                                <th className="py-3 px-4 text-left">작업 정보 (장소/인원/수량)</th>
+                                <th className="py-3 px-4 text-center w-24">문서 출력</th>
                                 <th className="py-3 px-4 text-center w-28">관리</th>
                             </tr>
                         </thead>
                         <tbody>
                             {reports.map((r) => (
-                                <tr key={r.id} className="border-t border-gray-50 hover:bg-blue-50/30 transition">
-                                    <td className="py-3 px-4 font-semibold text-gray-700 whitespace-nowrap">{r.date}</td>
-                                    <td className="py-3 px-4 whitespace-nowrap">{weatherIcons[r.weather] || '🌤️'} {r.weather}</td>
-                                    <td className="py-3 px-4 text-gray-600 max-w-xs truncate">{r.taskContent}</td>
-                                    <td className="py-3 px-4 text-gray-500 text-xs">{r.personnel || '-'}</td>
-                                    <td className="py-3 px-4 text-gray-500 text-xs max-w-[150px] truncate">{r.issues || '-'}</td>
+                                <tr key={r.id} className={`border-t border-gray-50 hover:bg-blue-50/30 transition cursor-pointer group ${selectedReport?.id === r.id ? 'bg-blue-50 ring-1 ring-blue-200' : ''}`} 
+                                    onClick={() => { setSelectedReport(r); setGDocForceGenerate(false); setShowGDocModal(true); }}>
+                                    <td className="py-3 px-4">
+                                        <div className="font-semibold text-gray-700">{getDisplayValue(r, 'date')}</div>
+                                        <div className="text-xs text-gray-400 mt-0.5">기온: {getDisplayValue(r, 'temperature')}</div>
+                                    </td>
+                                    <td className="py-3 px-4 text-gray-800 font-medium">{getDisplayValue(r, 'work_type')}</td>
+                                    <td className="py-3 px-4 text-sm">
+                                        <div className="flex flex-col gap-0.5">
+                                            <div className="text-gray-600"><span className="text-xs text-gray-400 mr-1">📍</span>{getDisplayValue(r, 'location')}</div>
+                                            <div className="text-gray-600"><span className="text-xs text-gray-400 mr-1">👷</span>{getDisplayValue(r, 'workers')}</div>
+                                            <div className="text-blue-600 font-bold bg-blue-50 w-fit px-1.5 py-0.5 rounded mt-0.5"><span className="text-xs font-normal text-blue-400 mr-1">📦</span>{getDisplayValue(r, 'work_qty')}</div>
+                                        </div>
+                                    </td>
                                     <td className="py-3 px-4 text-center">
-                                        <div className="flex items-center justify-center gap-1">
-                                            <button onClick={() => openEdit(r)} className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">수정</button>
-                                            <button onClick={() => handleDelete(r)} className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">삭제</button>
+                                        <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                            {r.gdocUrl ? (
+                                                <>
+                                                    <a 
+                                                        href={r.gdocUrl} 
+                                                        target="_blank" 
+                                                        rel="noopener noreferrer"
+                                                        title="구글 독스 열기"
+                                                        className="p-1.5 bg-green-50 text-green-600 rounded-lg border border-green-100 hover:bg-green-100 transition shadow-sm"
+                                                    >
+                                                        🌐
+                                                    </a>
+                                                    <a 
+                                                        href={`https://docs.google.com/document/d/${r.gdocUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1]}/export?format=pdf`}
+                                                        title="PDF 다운로드"
+                                                        className="p-1.5 bg-red-50 text-red-600 rounded-lg border border-red-100 hover:bg-red-100 transition shadow-sm"
+                                                    >
+                                                        📥
+                                                    </a>
+                                                </>
+                                            ) : (
+                                                <button 
+                                                    onClick={() => { setSelectedReport(r); setGDocForceGenerate(true); setShowGDocModal(true); }}
+                                                    className="text-[10px] px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold shadow-sm flex items-center gap-1"
+                                                >
+                                                    📄 출력
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="py-3 px-4 text-center">
+                                        <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                            <button onClick={() => handleDelete(r)} className="text-xs text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition">삭제</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -155,48 +229,23 @@ export default function DailyReportPage() {
                 </div>
             )}
 
-            {/* 작성/수정 모달 */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center">
-                    <div className="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[90vh] overflow-y-auto p-6">
-                        <h2 className="text-lg font-bold text-gray-800 mb-4">{editItem ? '✏️ 감리일보 수정' : '📝 감리일보 작성'}</h2>
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">작업 일자 *</label>
-                                    <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">날씨</label>
-                                    <select value={formWeather} onChange={(e) => setFormWeather(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                                        {weatherOptions.map((w) => <option key={w} value={w}>{weatherIcons[w]} {w}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">금일 작업 내용 *</label>
-                                <textarea value={formTask} onChange={(e) => setFormTask(e.target.value)} rows={3} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 resize-none" placeholder="광케이블 2km 포설, 통신주 건주 3본 등" required />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">투입 인력 및 장비</label>
-                                <input value={formPersonnel} onChange={(e) => setFormPersonnel(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="기술자 3명, 굴착기 1대" />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">특이사항 / 현장 이슈</label>
-                                <textarea value={formIssues} onChange={(e) => setFormIssues(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 resize-none" placeholder="A구역 암반 출현, 자재 수급 지연 등" />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">명일 계획</label>
-                                <textarea value={formNext} onChange={(e) => setFormNext(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 resize-none" placeholder="B구역 관로 포설 착수 예정" />
-                            </div>
-                        </div>
-                        <div className="flex gap-2 mt-6">
-                            <button onClick={() => { setShowModal(false); resetForm(); }} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 transition">취소</button>
-                            <button onClick={handleSave} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">{editItem ? '수정 완료' : '일보 저장'}</button>
-                        </div>
-                    </div>
+            <div className="mt-4 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 flex items-start gap-3">
+                <span className="text-indigo-500 text-lg">💡</span>
+                <div className="text-xs text-indigo-700 leading-normal">
+                    <p className="font-bold mb-1">구글 독스 자동 출력 안내</p>
+                    <p>별도의 서버 프로그램 설치 없이, 구글 독스 URL만 연결하면 즉시 문서를 생성하고 PDF로 다운로드할 수 있습니다.</p>
                 </div>
-            )}
+            </div>
+
+            {/* 구글 독스 동적 모달 */}
+            <GDocDynamicModal 
+                isOpen={showGDocModal} 
+                onClose={() => setShowGDocModal(false)} 
+                prefillData={selectedReport?.data}
+                onSave={handleGDocSave}
+                documentType="daily_report"
+                forceGenerate={gdocForceGenerate}
+            />
         </DashboardLayout>
     );
 }

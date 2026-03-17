@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
+import GDocDynamicModal from '@/components/GDocDynamicModal'; // 추가
 import { db } from '@/lib/firebase';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
 
@@ -13,6 +15,7 @@ interface Inspection {
     date: string;
     inspector: string;
     status: string;
+    gdocUrl?: string;
 }
 
 const defaultInspections: Omit<Inspection, 'id'>[] = [
@@ -23,27 +26,38 @@ const defaultInspections: Omit<Inspection, 'id'>[] = [
 
 function StatusBadge({ status }: { status: string }) {
     const map: Record<string, string> = {
-        'Approved': 'bg-green-100 text-green-700',
-        'Rejected': 'bg-red-100 text-red-700',
-        'Pending': 'bg-yellow-100 text-yellow-700',
+        'Approved': 'bg-green-100 text-green-700 font-bold border-green-200',
+        'Rejected': 'bg-red-100 text-red-700 font-bold border-red-200',
+        'Pending': 'bg-yellow-100 text-yellow-700 font-bold border-yellow-200',
     };
-    return <span className={`text-xs font-bold px-3 py-1 rounded-full ${map[status] || ''}`}>{status}</span>;
+    return <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${map[status] || ''}`}>{status}</span>;
 }
 
 export default function QualityPage() {
     const [items, setItems] = useState<Inspection[]>([]);
-    const [showModal, setShowModal] = useState(false);
+    const [showGDocModal, setShowGDocModal] = useState(false);
     const [loading, setLoading] = useState(true);
-
-    const [formId, setFormId] = useState('');
-    const [formName, setFormName] = useState('');
-    const [formLocation, setFormLocation] = useState('');
-    const [formDate, setFormDate] = useState('');
-    const [formInspector, setFormInspector] = useState('');
+    const [selectedItem, setSelectedItem] = useState<Inspection | null>(null);
+    const [gdocForceGenerate, setGDocForceGenerate] = useState(false);
 
     const colRef = collection(db, 'inspections');
 
     useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const searchParams = new URLSearchParams(window.location.search);
+            const wbs = searchParams.get('wbs');
+            if (wbs) {
+                const name = searchParams.get('name') || '';
+                const loc = searchParams.get('location') || '';
+                
+                // 신규 작성을 위해 모달 오픈
+                setSelectedItem(null);
+                setGDocForceGenerate(false);
+                setShowGDocModal(true);
+                window.history.replaceState(null, '', '/quality');
+            }
+        }
+
         const q = query(colRef, orderBy('inspId'));
         const unsub = onSnapshot(q, (snap) => {
             if (snap.empty) {
@@ -54,7 +68,6 @@ export default function QualityPage() {
             setLoading(false);
         });
         return () => unsub();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const handleApprove = async (item: Inspection) => {
@@ -70,55 +83,72 @@ export default function QualityPage() {
         await deleteDoc(doc(db, 'inspections', item.id));
     };
 
-    const handleAdd = async () => {
-        await addDoc(colRef, {
-            inspId: formId,
-            name: formName,
-            location: formLocation,
-            date: formDate,
-            inspector: formInspector,
-            status: 'Pending',
-        });
-        setShowModal(false);
-        setFormId(''); setFormName(''); setFormLocation(''); setFormDate(''); setFormInspector('');
-    };
-
     return (
         <DashboardLayout>
-            <div className="text-sm text-gray-500 mb-2">🏠 홈 / <span className="text-gray-800 font-medium">Quality</span></div>
-            <div className="flex items-center justify-between mb-6">
+            <div className="text-sm text-gray-500 mb-2">
+                <Link href="/" className="hover:text-blue-600 transition-colors">🏠 홈</Link> / <span className="text-gray-800 font-medium">Quality</span>
+            </div>
+            <div className="flex items-center justify-between mb-8">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">품질/검측 관리</h1>
                     <p className="text-sm text-gray-500">현장 검측 요청 내역 및 승인 프로세스</p>
                 </div>
-                <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition shadow-sm">📋 검측 요청서 작성</button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => { setSelectedItem(null); setGDocForceGenerate(false); setShowGDocModal(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition shadow-sm">📋 검측 요청서 작성</button>
+                </div>
             </div>
 
             {loading ? (
                 <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {items.map((item) => (
-                        <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition">
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded font-mono">{item.inspId}</span>
+                        <div 
+                            key={item.id} 
+                            className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer relative overflow-hidden group ${selectedItem?.id === item.id ? 'ring-2 ring-indigo-500 bg-indigo-50/10' : ''}`} 
+                            onClick={() => { setSelectedItem(item); setGDocForceGenerate(false); setShowGDocModal(true); }}
+                        >
+                            <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition flex items-center gap-1.5 bg-white/90 backdrop-blur-md rounded-bl-xl border-l border-b border-gray-100 shadow-sm" onClick={(e) => e.stopPropagation()}>
+                                {item.gdocUrl ? (
+                                    <>
+                                        <a href={item.gdocUrl} target="_blank" rel="noopener noreferrer" title="독스 열기" className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition text-xs">🌐</a>
+                                        <a href={`https://docs.google.com/document/d/${item.gdocUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1]}/export?format=pdf`} title="PDF 다운로드" className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition text-xs">📥</a>
+                                    </>
+                                ) : (
+                                    <button onClick={() => { setSelectedItem(item); setGDocForceGenerate(true); setShowGDocModal(true); }} className="text-[10px] bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-sm flex items-center gap-1">📄 출력</button>
+                                )}
+                            </div>
+                            <div className="flex items-center justify-between mb-4">
+                                <span className="text-[10px] tracking-tighter bg-gray-50 text-gray-400 px-2 py-1 rounded-md font-mono border border-gray-100">{item.inspId}</span>
                                 <StatusBadge status={item.status} />
                             </div>
-                            <h3 className="text-lg font-bold text-gray-800 mb-1">{item.name}</h3>
-                            <p className="text-sm text-gray-500 mb-4">• {item.location}</p>
-                            <div className="flex justify-between text-xs text-gray-400 mb-4">
-                                <span>요청일자: {item.date}</span>
-                                <span>검측관: {item.inspector}</span>
+                            <h3 className="text-lg font-black text-gray-800 mb-2 leading-tight">{item.name}</h3>
+                            <div className="flex items-start gap-2 mb-6">
+                                <span className="text-gray-400 text-xs">📍</span>
+                                <p className="text-xs text-gray-500 font-medium">{item.location}</p>
+                            </div>
+                            <div className="flex justify-between items-center py-3 border-t border-gray-50 text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-4">
+                                <div className="flex flex-col">
+                                    <span className="opacity-50">DATE</span>
+                                    <span className="text-gray-600">{item.date}</span>
+                                </div>
+                                <div className="flex flex-col text-right">
+                                    <span className="opacity-50">INSPECTOR</span>
+                                    <span className="text-gray-600">{item.inspector}</span>
+                                </div>
                             </div>
                             {item.status === 'Pending' ? (
                                 <div className="flex gap-2">
-                                    <button onClick={() => handleReject(item)} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-red-600 font-medium hover:bg-red-50 transition">❌ 반려</button>
-                                    <button onClick={() => handleApprove(item)} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">✅ 승인</button>
+                                    <button onClick={(e) => { e.stopPropagation(); handleReject(item); }} className="flex-1 py-2.5 border border-red-100 rounded-xl text-xs text-red-600 font-bold hover:bg-red-50 transition uppercase tracking-wider">Reject</button>
+                                    <button onClick={(e) => { e.stopPropagation(); handleApprove(item); }} className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100 uppercase tracking-wider">Approve</button>
                                 </div>
                             ) : (
-                                <div className="flex gap-2">
-                                    <p className="flex-1 text-center text-xs text-gray-400 py-2">처리 완료</p>
-                                    <button onClick={() => handleDelete(item)} className="text-xs text-red-400 hover:text-red-600 px-2">삭제</button>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-gray-400 font-black flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 bg-gray-200 rounded-full"></span>
+                                        COMPLETED
+                                    </span>
+                                    <button onClick={(e) => { e.stopPropagation(); handleDelete(item); }} className="text-[10px] font-black text-red-300 hover:text-red-500 transition-colors uppercase">Delete</button>
                                 </div>
                             )}
                         </div>
@@ -126,42 +156,30 @@ export default function QualityPage() {
                 </div>
             )}
 
-            {/* 검측 요청서 작성 모달 */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center">
-                    <div className="bg-white rounded-2xl shadow-2xl w-[480px] p-6">
-                        <h2 className="text-lg font-bold text-gray-800 mb-4">📋 검측 요청서 작성</h2>
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">검측 ID</label>
-                                    <input value={formId} onChange={(e) => setFormId(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="INS-004" />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-500 font-medium">검측관</label>
-                                    <input value={formInspector} onChange={(e) => setFormInspector(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="김감리" />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">검측명</label>
-                                <input value={formName} onChange={(e) => setFormName(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="배관 압력 시험" />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">검측 위치</label>
-                                <input value={formLocation} onChange={(e) => setFormLocation(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="B구역 3번 맨홀" />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500 font-medium">요청일자</label>
-                                <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
-                            </div>
-                        </div>
-                        <div className="flex gap-2 mt-6">
-                            <button onClick={() => setShowModal(false)} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 transition">취소</button>
-                            <button onClick={handleAdd} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">요청서 제출</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* 구글 독스 모달 */}
+            <GDocDynamicModal 
+                isOpen={showGDocModal} 
+                onClose={() => setShowGDocModal(false)}
+                prefillData={selectedItem ? {
+                    inspId: selectedItem.inspId,
+                    name: selectedItem.name,
+                    location: selectedItem.location,
+                    date: selectedItem.date,
+                    inspector: selectedItem.inspector,
+                    status: selectedItem.status,
+                } : undefined}
+                onSave={async (data) => {
+                    if (selectedItem) {
+                        const { gdocUrl, ...rest } = data;
+                        await updateDoc(doc(db, 'inspections', selectedItem.id), {
+                            ...rest,
+                            gdocUrl: gdocUrl || null,
+                        });
+                    }
+                }}
+                documentType="quality"
+                forceGenerate={gdocForceGenerate}
+            />
         </DashboardLayout>
     );
 }

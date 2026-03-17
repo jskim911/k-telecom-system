@@ -1,0 +1,5 @@
+src/app/schedule/page.tsx(414,17): error TS1005: ')' expected.
+src/app/schedule/page.tsx(414,19): error TS17002: Expected corresponding JSX closing tag for 'DashboardLayout'.
+src/app/schedule/page.tsx(459,9): error TS1128: Declaration or statement expected.
+src/app/schedule/page.tsx(460,5): error TS1109: Expression expected.
+src/app/schedule/page.tsx(461,1): error TS1128: Declaration or statement expected.

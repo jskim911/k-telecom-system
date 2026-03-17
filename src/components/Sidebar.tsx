@@ -9,11 +9,11 @@ import { doc, onSnapshot } from 'firebase/firestore';
 const menuItems = [
     { label: '대시보드', icon: '📊', href: '/' },
     { label: '공정 관리', icon: '📅', href: '/schedule' },
-    { label: '감리일보', icon: '📝', href: '/daily-report' },
-    { label: '품질/검측', icon: '🔍', href: '/quality' },
-    { label: '안전 관리', icon: '⚠️', href: '/safety' },
-    { label: '문서 관리', icon: '📁', href: '/documents' },
+    { label: '양식 관리', icon: '📋', href: '/forms' },
+    { label: '스마트문서', icon: '🖋️', href: '/documents' },
     { label: '기본정보', icon: '⚙️', href: '/settings' },
+    { label: '사용자 승인', icon: '👥', href: '/admin/users' },
+    { label: '화면설계', icon: '🎨', href: '/admin/process-design' },
 ];
 
 export default function Sidebar() {
@@ -74,6 +74,7 @@ export default function Sidebar() {
                     );
                 })}
             </nav>
+
 
             {/* 하단 PM 프로필 - Firestore 연동 */}
             <div className="px-4 py-4 border-t border-slate-700">

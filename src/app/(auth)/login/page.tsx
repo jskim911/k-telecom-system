@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -60,9 +61,12 @@ export default function LoginPage() {
                         로그인
                     </button>
                 </form>
-                <div className="mt-4 text-center">
-                    <p className="text-sm text-gray-500">
-                        계정이 없으신가요? <a href="#" className="text-blue-600 font-medium hover:underline">회원가입 요청</a>
+                <div className="mt-6 text-center">
+                    <p className="text-sm text-gray-500 font-medium">
+                        계정이 없으신가요?{" "}
+                        <Link href="/signup" className="text-[#1A56DB] font-bold hover:underline">
+                            회원가입 요청
+                        </Link>
                     </p>
                 </div>
             </div>

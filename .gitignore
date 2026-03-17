@@ -35,6 +35,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Google API Secrets
+credentials.json
+token.json
+
 # Anti-Gravity / Agents
 .agents/
 .agent/

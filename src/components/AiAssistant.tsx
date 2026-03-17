@@ -1,23 +1,25 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
 
 interface Message {
-    role: 'user' | 'assistant';
+    role: 'user' | 'model'; // Gemini SDK uses 'model' instead of 'assistant'
     content: string;
 }
 
 const suggestions = [
-    '이번 주 지연 공정 대책을 알려줘',
-    '감리일보 요약해줘',
+    '우리 프로젝트 공기를 알려줘',
+    '등록된 공정 리스트와 가중치를 보여줘',
     '안전관리 점검 체크리스트',
     '품질 검측 절차 안내',
 ];
 
 export default function AiAssistant() {
+    const { userData } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: '안녕하세요! K-Telecom 감리시스템 AI 비서입니다. 현장 관리에 대해 무엇이든 물어보세요. 🏗️' },
+        { role: 'model', content: '안녕하세요! K-Telecom 감리시스템 AI 비서입니다. 현장 관리에 대해 무엇이든 물어보세요. 🏗️' },
     ]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -31,22 +33,51 @@ export default function AiAssistant() {
         const userMessage = text || input.trim();
         if (!userMessage) return;
 
-        setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+        // API Key 체크
+        if (!userData?.geminiApiKey) {
+            setMessages((prev: Message[]) => [
+                ...prev, 
+                { role: 'user', content: userMessage },
+                { role: 'model', content: '⚠️ 회원가입 시 등록된 Gemini API Key가 없습니다. 프로필 설정에서 API Key를 등록하신 후 다시 시도해 주세요.' }
+            ]);
+            setInput('');
+            return;
+        }
+
+        setMessages((prev: Message[]) => [...prev, { role: 'user', content: userMessage }]);
         setInput('');
         setLoading(true);
 
-        // 시뮬레이션 응답 (추후 Gemini API 연동)
-        setTimeout(() => {
-            const responses: Record<string, string> = {
-                '이번 주 지연 공정 대책을 알려줘': '📊 현재 WBS-201(통신 장비실 랙 설치)이 40% 진도율로 지연 상태입니다.\n\n**대책 방안:**\n1. 투입 인력 2명 → 4명으로 증원\n2. 자재 선투입 일정 조정 (D-3일)\n3. 야간작업 검토 (안전관리 병행)\n4. 발주처 공기 연장 협의 검토',
-                '감리일보 요약해줘': '📝 **2024-04-10 감리일보 요약**\n\n• 금일 작업: 맨홀 터파기 3개소, 관로 포설 200m\n• 투입인력: 현장 12명, 감리 3명\n• 특이사항: A구역 암반 출현으로 장비 추가 투입 필요\n• 내일 예정: B구역 관로 포설 착수',
-                '안전관리 점검 체크리스트': '🛡️ **일일 안전 점검 체크리스트**\n\n✅ 개인보호구 착용 상태\n✅ 작업 전 TBM 실시\n✅ 밀폐공간 산소농도 측정\n✅ 중장비 작업반경 확인\n✅ 가설울타리/안내판 설치\n✅ 교통통제 조치 확인\n✅ 작업 후 현장정리 상태',
-                '품질 검측 절차 안내': '🔍 **품질 검측 진행 절차**\n\n1️⃣ 시공사 → 검측 요청서 제출\n2️⃣ 감리원 → 현장 검측 실시\n3️⃣ 검측 결과 기록 (사진 첨부)\n4️⃣ 합격 → 승인 / 불합격 → 반려\n5️⃣ 반려 시 시정 후 재검측 요청',
-            };
-            const answer = responses[userMessage] || `💡 "${userMessage}"에 대해 분석 중입니다.\n\n현재 시스템에 등록된 데이터를 기반으로 검토하겠습니다. 잠시만 기다려 주세요.\n\n(향후 Gemini API 연동 시 실시간 응답이 제공됩니다.)`;
-            setMessages(prev => [...prev, { role: 'assistant', content: answer }]);
+        try {
+            // 대화 내역 가공 (Gemini SDK 형식)
+            const history = messages.slice(1).map(msg => ({
+                role: msg.role,
+                parts: [{ text: msg.content }]
+            }));
+
+            const response = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: userMessage,
+                    apiKey: userData.geminiApiKey,
+                    history: history
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                setMessages((prev: Message[]) => [...prev, { role: 'model', content: data.content }]);
+            } else {
+                setMessages((prev: Message[]) => [...prev, { role: 'model', content: `❌ 오류: ${data.message}` }]);
+            }
+        } catch (error) {
+            console.error('Chat Error:', error);
+            setMessages((prev: Message[]) => [...prev, { role: 'model', content: '❌ 서버와의 통신 중 오류가 발생했습니다.' }]);
+        } finally {
             setLoading(false);
-        }, 1200);
+        }
     };
 
     return (
