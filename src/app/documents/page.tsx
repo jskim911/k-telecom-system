@@ -376,29 +376,33 @@ export default function SmartApprovalPage() {
                     <div className="divide-y divide-gray-50">
                         {transmittals.length > 0 ? (
                             transmittals.map((t, i) => (
-                                <div key={t.id} className="flex items-center justify-between p-6 hover:bg-gray-50 transition group">
-                                    <div className="flex items-center gap-4 text-left">
-                                        <div className="text-[10px] font-black text-gray-400 w-20">
-                                            {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : '2026.03.19'}
-                                        </div>
-                                        <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-lg shadow-inner">📄</div>
-                                        <div>
-                                            <h4 className="font-black text-gray-800 text-sm">{t.title}</h4>
-                                            <p className="text-[10px] text-indigo-400 font-black mt-0.5">{t.docNo}</p>
+                                <div key={t.id} className="flex items-center justify-between p-6 hover:bg-gray-50 transition group border-l-4 border-l-transparent hover:border-l-indigo-500">
+                                    <div className="flex items-center gap-6 flex-1">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-lg shadow-inner group-hover:bg-indigo-50 transition">📄</div>
+                                            <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-4">
+                                                <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase tracking-tight">
+                                                    {t.docNo}
+                                                </span>
+                                                <span className="text-[10px] font-black text-gray-400 whitespace-nowrap">
+                                                    {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : '2026.03.19'}
+                                                </span>
+                                                <h4 className="font-black text-gray-800 text-sm truncate max-w-md">{t.title}</h4>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <button 
                                             onClick={() => t.gdocUrl && window.open(t.gdocUrl, '_blank')}
-                                            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black hover:bg-slate-200 transition"
+                                            className="px-4 py-2 bg-slate-50 text-slate-500 rounded-xl text-[10px] font-black hover:bg-slate-100 transition border border-gray-100"
                                         >
-                                            열기
+                                            문서 열기
                                         </button>
                                         <button 
                                             onClick={() => router.push(`/documents/workshop/${t.id}`)}
-                                            className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black hover:bg-indigo-700 transition"
+                                            className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
                                         >
-                                            워크숍
+                                            편집/서명
                                         </button>
                                     </div>
                                 </div>
