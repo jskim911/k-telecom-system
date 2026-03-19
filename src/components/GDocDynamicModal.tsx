@@ -16,13 +16,14 @@ interface GDocDynamicModalProps {
     onSave?: (data: Record<string, string>) => Promise<void>;
     documentType?: string;
     forceGenerate?: boolean;
+    initialDocUrl?: string; // 추가: 초기 URL 주입
 }
 
 /**
  * 구글 독스 동적 양식 입력 모달
  * 구글 독스 ID 또는 URL을 입력하면 내부 태그({{태그}})를 분석하여 자동으로 입력창을 생성합니다.
  */
-export default function GDocDynamicModal({ isOpen, onClose, prefillData, onSave, documentType, forceGenerate }: GDocDynamicModalProps) {
+export default function GDocDynamicModal({ isOpen, onClose, prefillData, onSave, documentType, forceGenerate, initialDocUrl }: GDocDynamicModalProps) {
     const [step, setStep] = useState<'select' | 'input' | 'result'>('select');
     const [docUrl, setDocUrl] = useState<string>('');
     const [analysis, setAnalysis] = useState<GDocAnalysisResult | null>(null);
@@ -57,7 +58,9 @@ export default function GDocDynamicModal({ isOpen, onClose, prefillData, onSave,
                 const parsedTemplates = saved ? JSON.parse(saved) : [];
                 setRecentTemplates(parsedTemplates);
 
-                if (parsedTemplates.length > 0) {
+                if (initialDocUrl) {
+                    await handleAnalyze(initialDocUrl);
+                } else if (parsedTemplates.length > 0) {
                     const defaultTemplate = parsedTemplates[0];
                     const docId = extractDocIdFromUrl(defaultTemplate.url);
 
@@ -86,7 +89,7 @@ export default function GDocDynamicModal({ isOpen, onClose, prefillData, onSave,
         };
 
         initializeModal();
-    }, [isOpen, documentType]); // documentType 변경 시에도 대응
+    }, [isOpen, documentType, initialDocUrl]); // Added initialDocUrl to dependencies
 
     const handleAnalyze = async (specificUrl?: string): Promise<GDocAnalysisResult | null> => {
         const targetUrl = specificUrl || docUrl.trim();

@@ -400,6 +400,82 @@ export class GDocEngine {
   }
 
   /**
+   * 문서 내 특정 태그 위치에 서명 이미지 삽입
+   * @param documentId 구글 독스 ID
+   * @param tag 서명 주입 위치 태그 (예: {{서명}})
+   * @param imageUrl 서명 이미지 URL (공개 접근 가능해야 함)
+   */
+  async insertSignatureImage(documentId: string, tag: string, imageUrl: string) {
+    try {
+      const auth = await this.getAuth();
+      const docRes = await this.docs.documents.get({ auth: auth as any, documentId });
+      
+      const tagPattern = new RegExp(tag.replace(/([.*+?^${}()|[\]\\])/g, '\\$1'), 'g');
+      let foundRange: { startIndex: number, endIndex: number } | null = null;
+
+      const collectElements = (content: any[]) => {
+        content.forEach(element => {
+          if (element.paragraph) {
+            element.paragraph.elements.forEach((el: any) => {
+              if (el.textRun?.content) {
+                const match = tagPattern.exec(el.textRun.content);
+                if (match && !foundRange) {
+                  foundRange = {
+                    startIndex: el.startIndex + match.index,
+                    endIndex: el.startIndex + match.index + match[0].length
+                  };
+                }
+              }
+            });
+          } else if (element.table) {
+            element.table.tableRows.forEach((row: any) => {
+              row.tableCells.forEach((cell: any) => collectElements(cell.content));
+            });
+          }
+        });
+      };
+
+      if (docRes.data.body?.content) collectElements(docRes.data.body.content);
+
+      if (!foundRange) {
+        console.log(`⚠️ [GDocEngine] 서명 태그(${tag})를 찾을 수 없습니다.`);
+        return { success: false, message: 'Tag not found' };
+      }
+
+      // 1. 태그 삭제 및 이미지 삽입 요청
+      const requests = [
+        {
+          deleteContentRange: {
+            range: foundRange
+          }
+        },
+        {
+          insertInlineImage: {
+            location: { index: (foundRange as { startIndex: number }).startIndex },
+            uri: imageUrl,
+            objectSize: {
+                width: { magnitude: 100, unit: 'PT' },
+                height: { magnitude: 100, unit: 'PT' }
+            }
+          }
+        }
+      ];
+
+      await this.docs.documents.batchUpdate({
+        auth: auth as any,
+        documentId,
+        requestBody: { requests }
+      });
+
+      console.log(`✅ [GDocEngine] 서명 삽입 완료: ${documentId}`);
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ [GDocEngine] 서명 삽입 에러:', error);
+      throw error;
+    }
+  }
+
+  /**
    * PDF로 내보내기 링크 생성
    */
   getExportPdfUrl(documentId: string) {

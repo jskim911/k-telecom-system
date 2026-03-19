@@ -55,6 +55,22 @@ export async function generateGDocDocument(req: GDocGenerateRequest): Promise<GD
 }
 
 /**
+ * 구글 독스 디지털 서명 삽입 요청
+ */
+export async function insertSignature(documentId: string, tag: string, imageUrl: string): Promise<{ success: boolean }> {
+  const res = await fetch('/api/signature', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documentId, tag, imageUrl }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message || "서명 삽입 실패");
+  }
+  return await res.json();
+}
+
+/**
  * 구글 독스 URL에서 ID 추출 유틸리티
  */
 export function extractDocIdFromUrl(url: string): string {
