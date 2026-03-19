@@ -419,7 +419,7 @@ export default function SmartApprovalPage() {
             <div className="flex items-center justify-between mb-8">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
-                        🖋️ [최신] 스마트문서 센터
+                        🖋️ 스마트문서 센터
                     </h1>
                     <p className="text-sm text-gray-500 font-medium mt-1">행정 문서 수발송 및 전자 결재 워크플로우</p>
                 </div>
