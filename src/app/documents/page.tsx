@@ -4,10 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { db, auth } from '@/lib/firebase';
-import { collection, addDoc, doc, onSnapshot, query, orderBy, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, onSnapshot, query, orderBy, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import {
+    generateGDocDocument,
+    extractDocIdFromUrl,
+    insertSignature
+} from '@/lib/gdoc-client';
 import GDocDynamicModal from '@/components/GDocDynamicModal';
-import { insertSignature } from '@/lib/gdoc-client';
 
 // --- Types ---
 interface Transmittal {
@@ -56,6 +60,7 @@ export default function SmartApprovalPage() {
     const router = useRouter();
     const [activeTab, setActiveTab] = useState('log');
     const [subTab, setSubTab] = useState<'standard' | 'output'>('standard');
+    const [templateCategory, setTemplateCategory] = useState<'official' | 'instruction' | 'report'>('official');
     const [transmittals, setTransmittals] = useState<Transmittal[]>([]);
     const [loading, setLoading] = useState(true);
     const [showGDocModal, setShowGDocModal] = useState(false);
@@ -101,6 +106,63 @@ export default function SmartApprovalPage() {
         const seq = String(transmittals.length + 1).padStart(3, '0');
         const typeCode = type === '공문' ? 'OFF' : type === '현장지시서' ? 'FLD' : 'REP';
         return `K-TEL-${typeCode}-${year}-${seq}`;
+    };
+
+    // 즉시 문서 생성 핸들러 (모달 생략)
+    const handleInstantCreate = async (type: string, templateUrl: string) => {
+        if (!templateUrl) return;
+        
+        setLoading(true);
+        try {
+            // 1. 문서번호 및 제목 생성 (간소화)
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
+            const randomId = Math.floor(Math.random() * 900) + 100;
+            const docNo = `K-TEL-${type === '공문' ? 'OFF' : type === '현장지시서' ? 'INS' : 'REP'}-${now.getFullYear()}-${randomId}`;
+            const title = `[${dateStr}] ${type}_신규문서`;
+
+            // 2. 구글 독스 생성 요청 (최소 태그만 전달)
+            const templateId = extractDocIdFromUrl(templateUrl);
+            const result = await generateGDocDocument({
+                templateId,
+                title,
+                documentType: type,
+                textData: {
+                    '문서번호': docNo,
+                    '날짜': dateStr,
+                    '제목': title,
+                    '입안일': dateStr
+                }
+            });
+
+            // 3. Firestore 저장
+            const docRef = await addDoc(collection(db, 'transmittals'), {
+                docNo,
+                title,
+                type,
+                status: 'Draft',
+                gdocUrl: result.url,
+                documentId: result.documentId,
+                createdAt: serverTimestamp(),
+                sender: '김정수 (관리자)',
+                recipient: '수신처 입력',
+                currentStep: 'Submitter',
+                approvalLine: {
+                    submitter: '김정수',
+                    reviewer: '박검토',
+                    approver: '이승인'
+                }
+            });
+
+            // 4. 워크숍으로 이동
+            router.push(`/documents/workshop/${docRef.id}`);
+            
+        } catch (err: any) {
+            console.error('Instant create error:', err);
+            alert(`문서 생성 중 오류가 발생했습니다: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
     };
 
     // GDocDynamicModal에서 호출될 저장 콜백
@@ -327,54 +389,74 @@ export default function SmartApprovalPage() {
             </div>
 
             {subTab === 'standard' ? (
-                <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="p-6 border-b border-gray-50">
-                        <h2 className="text-lg font-black text-gray-800">표준 양식 리스트</h2>
-                        <p className="text-xs text-gray-400 mt-1 font-bold">공식 업무에 사용되는 표준 서식 파일들입니다.</p>
-                    </div>
-                    <div className="divide-y divide-gray-50">
+                <div className="space-y-6">
+                    {/* 3대 카테고리 선정 */}
+                    <div className="flex gap-2">
                         {[
-                            { type: '공문', title: '[표준] 관공서식 공문 양식_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['공문'] },
-                            { type: '현장지시서', title: '[표준] 관공서식 현장지시서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['현장지시서'] },
-                            { type: '보고서', title: '[표준] 관공서식 보고서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['보고서'] },
-                        ].map((tmpl, i) => (
-                            <button 
-                                key={i} 
-                                onClick={() => tmpl.url && window.open(tmpl.url, '_blank')}
-                                className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition group"
+                            { id: 'official', label: '행정공문', icon: '📩' },
+                            { id: 'instruction', label: '현장지시', icon: '📢' },
+                            { id: 'report', label: '감리보고', icon: '📑' },
+                        ].map(cat => (
+                            <button
+                                key={cat.id}
+                                onClick={() => setTemplateCategory(cat.id as any)}
+                                className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all border ${
+                                    templateCategory === cat.id 
+                                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100' 
+                                    : 'bg-white border-gray-100 text-gray-400 hover:border-gray-200 hover:text-gray-600'
+                                }`}
                             >
-                                <div className="flex items-center gap-4 text-left">
-                                    <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition shadow-inner">
-                                        {tmpl.icon}
-                                    </div>
-                                    <div>
-                                        <h4 className="font-black text-gray-800 text-sm">{tmpl.title}</h4>
-                                        <p className="text-[10px] text-gray-400 font-bold mt-0.5">{tmpl.type} 표준 서식</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <button 
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            window.open(tmpl.url, '_blank');
-                                        }}
-                                        className="text-[10px] font-black text-gray-400 hover:text-gray-600 transition"
-                                    >
-                                        양식 보기
-                                    </button>
-                                    <button 
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setModalConfig({ type: tmpl.type as any, url: tmpl.url });
-                                            setShowGDocModal(true);
-                                        }}
-                                        className="text-[10px] font-black text-white bg-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
-                                    >
-                                        작성하기
-                                    </button>
-                                </div>
+                                <span className="mr-1">{cat.icon}</span> {cat.label}
                             </button>
                         ))}
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="p-6 border-b border-gray-50">
+                            <h2 className="text-lg font-black text-gray-800">
+                                {templateCategory === 'official' ? '행정 공문 양식' : templateCategory === 'instruction' ? '현장 지시 양식' : '감리 보고 양식'}
+                            </h2>
+                            <p className="text-xs text-gray-400 mt-1 font-bold">클릭 시 즉시 워크숍에서 작성을 시작합니다.</p>
+                        </div>
+                        <div className="divide-y divide-gray-50">
+                            {[
+                                { cat: 'official', type: '공문', title: '[표준] 관공서식 공문 양식_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['공문'] },
+                                { cat: 'instruction', type: '현장지시서', title: '[표준] 관공서식 현장지시서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['현장지시서'] },
+                                { cat: 'report', type: '보고서', title: '[표준] 관공서식 보고서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['보고서'] },
+                            ].filter(tmpl => tmpl.cat === templateCategory).map((tmpl, i) => (
+                                <div 
+                                    key={i} 
+                                    className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition group cursor-pointer"
+                                    onClick={() => handleInstantCreate(tmpl.type, tmpl.url || '')}
+                                >
+                                    <div className="flex items-center gap-4 text-left">
+                                        <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition shadow-inner">
+                                            {tmpl.icon}
+                                        </div>
+                                        <div>
+                                            <h4 className="font-black text-gray-800 text-sm group-hover:text-indigo-600 transition">{tmpl.title}</h4>
+                                            <p className="text-[10px] text-gray-400 font-bold mt-0.5">{tmpl.type} 표준 서식</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <button 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                window.open(tmpl.url, '_blank');
+                                            }}
+                                            className="text-[10px] font-black text-gray-400 hover:text-gray-600 transition"
+                                        >
+                                            양식 보기
+                                        </button>
+                                        <button 
+                                            className="text-[10px] font-black text-white bg-indigo-600 px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
+                                        >
+                                            즉시 작성 🖋️
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             ) : (
