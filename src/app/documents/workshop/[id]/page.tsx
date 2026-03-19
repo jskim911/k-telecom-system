@@ -112,7 +112,7 @@ export default function DocumentWorkshop() {
                 {/* 상단 툴바 */}
                 <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full transition">
+                        <button onClick={() => router.push('/documents')} className="p-2 hover:bg-gray-100 rounded-full transition">
                             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                             </svg>
