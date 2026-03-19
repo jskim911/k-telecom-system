@@ -42,6 +42,7 @@ const tabs = [
     { id: 'log', label: '수발송 대장', icon: '📋' },
     { id: 'approval', label: '전자 결재', icon: '🖋️' },
     { id: 'templates', label: '스마트문서함', icon: '🗂️' },
+    { id: 'create', label: '신규문서작성', icon: '➕' },
 ];
 
 // 표준 양식용 구글 독합 템플릿 ID (관공서 표준 서식)
@@ -202,15 +203,6 @@ export default function SmartApprovalPage() {
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
             <div className="p-6 border-b border-gray-50 flex items-center justify-between">
                 <h2 className="text-lg font-black text-gray-800">전체 수발송 이력</h2>
-                <button 
-                    onClick={() => {
-                        setModalConfig({ type: '공문', url: '' });
-                        setShowGDocModal(true);
-                    }}
-                    className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
-                >
-                    + 신규 문서 작성
-                </button>
             </div>
             <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -361,7 +353,25 @@ export default function SmartApprovalPage() {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-full opacity-0 group-hover:opacity-100 transition">양식 보기 →</span>
+                                    <button 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(tmpl.url, '_blank');
+                                        }}
+                                        className="text-[10px] font-black text-gray-400 hover:text-gray-600 transition"
+                                    >
+                                        양식 보기
+                                    </button>
+                                    <button 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setModalConfig({ type: tmpl.type as any, url: tmpl.url });
+                                            setShowGDocModal(true);
+                                        }}
+                                        className="text-[10px] font-black text-white bg-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
+                                    >
+                                        작성하기
+                                    </button>
                                 </div>
                             </button>
                         ))}
@@ -431,9 +441,16 @@ export default function SmartApprovalPage() {
                     {tabs.map(tab => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => {
+                                if (tab.id === 'create') {
+                                    setActiveTab('templates');
+                                    setSubTab('standard');
+                                } else {
+                                    setActiveTab(tab.id);
+                                }
+                            }}
                             className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                                activeTab === tab.id 
+                                (activeTab === tab.id || (tab.id === 'create' && activeTab === 'templates' && subTab === 'standard')) 
                                 ? 'bg-white text-indigo-600 shadow-sm' 
                                 : 'text-gray-400 hover:text-gray-600'
                             }`}
