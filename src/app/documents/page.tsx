@@ -41,7 +41,7 @@ interface UserProfile {
 const tabs = [
     { id: 'log', label: '수발송 대장', icon: '📋' },
     { id: 'approval', label: '전자 결재', icon: '🖋️' },
-    { id: 'templates', label: '표준 양식함', icon: '📁' },
+    { id: 'templates', label: '스마트문서함', icon: '🗂️' },
 ];
 
 // 표준 양식용 구글 독합 템플릿 ID (관공서 표준 서식)
@@ -54,6 +54,7 @@ const STANDARD_TEMPLATES = {
 export default function SmartApprovalPage() {
     const router = useRouter();
     const [activeTab, setActiveTab] = useState('log');
+    const [subTab, setSubTab] = useState<'standard' | 'output'>('standard');
     const [transmittals, setTransmittals] = useState<Transmittal[]>([]);
     const [loading, setLoading] = useState(true);
     const [showGDocModal, setShowGDocModal] = useState(false);
@@ -314,45 +315,100 @@ export default function SmartApprovalPage() {
     );
 
     const renderTemplatesTab = () => (
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
-            <div className="p-6 border-b border-gray-50">
-                <h2 className="text-lg font-black text-gray-800">표준 양식함 (Agency Templates)</h2>
-                <p className="text-xs text-gray-400 mt-1 font-bold">클릭하면 표준 양식 문서를 즉시 확인할 수 있습니다.</p>
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            {/* 서브 탭 (표준양식함 / 출력문서함) */}
+            <div className="flex gap-4 border-b border-gray-100 pb-1">
+                <button 
+                    onClick={() => setSubTab('standard')}
+                    className={`pb-3 px-2 text-sm font-black transition-all relative ${subTab === 'standard' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                    표준양식함
+                    {subTab === 'standard' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-600 rounded-full" />}
+                </button>
+                <button 
+                    onClick={() => setSubTab('output')}
+                    className={`pb-3 px-2 text-sm font-black transition-all relative ${subTab === 'output' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                    출력문서함
+                    {subTab === 'output' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-600 rounded-full" />}
+                </button>
             </div>
-            <div className="divide-y divide-gray-50">
-                {[
-                    { type: '공문', title: '[표준] 관공서식 공문 양식_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['공문'] },
-                    { type: '현장지시서', title: '[표준] 관공서식 현장지시서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['현장지시서'] },
-                    { type: '보고서', title: '[표준] 관공서식 보고서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['보고서'] },
-                ].map((tmpl, i) => (
-                    <button 
-                        key={i} 
-                        onClick={() => tmpl.url && window.open(tmpl.url, '_blank')}
-                        className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition group"
-                    >
-                        <div className="flex items-center gap-4 text-left">
-                            <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition shadow-inner">
-                                {tmpl.icon}
-                            </div>
-                            <div>
-                                <h4 className="font-black text-gray-800 text-sm">{tmpl.title}</h4>
-                                <p className="text-[10px] text-gray-400 font-bold mt-0.5">{tmpl.type} 표준 서식</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-full opacity-0 group-hover:opacity-100 transition">양식 보기 →</span>
-                            <svg className="w-5 h-5 text-gray-300 group-hover:text-indigo-400 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                        </div>
-                    </button>
-                ))}
-            </div>
-            <div className="p-8 bg-slate-50/50 text-center">
-                <p className="text-[11px] text-gray-400 font-bold">
-                    * 모든 양식은 실시간으로 업데이트되며, 관공서 표준 규격을 준수합니다.
-                </p>
-            </div>
+
+            {subTab === 'standard' ? (
+                <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-6 border-b border-gray-50">
+                        <h2 className="text-lg font-black text-gray-800">표준 양식 리스트</h2>
+                        <p className="text-xs text-gray-400 mt-1 font-bold">공식 업무에 사용되는 표준 서식 파일들입니다.</p>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                        {[
+                            { type: '공문', title: '[표준] 관공서식 공문 양식_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['공문'] },
+                            { type: '현장지시서', title: '[표준] 관공서식 현장지시서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['현장지시서'] },
+                            { type: '보고서', title: '[표준] 관공서식 보고서_K-TEL', icon: '📄', url: STANDARD_TEMPLATES['보고서'] },
+                        ].map((tmpl, i) => (
+                            <button 
+                                key={i} 
+                                onClick={() => tmpl.url && window.open(tmpl.url, '_blank')}
+                                className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition group"
+                            >
+                                <div className="flex items-center gap-4 text-left">
+                                    <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition shadow-inner">
+                                        {tmpl.icon}
+                                    </div>
+                                    <div>
+                                        <h4 className="font-black text-gray-800 text-sm">{tmpl.title}</h4>
+                                        <p className="text-[10px] text-gray-400 font-bold mt-0.5">{tmpl.type} 표준 서식</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-full opacity-0 group-hover:opacity-100 transition">양식 보기 →</span>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            ) : (
+                <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-6 border-b border-gray-50">
+                        <h2 className="text-lg font-black text-gray-800">문서 출력 보관소 (Archives)</h2>
+                        <p className="text-xs text-gray-400 mt-1 font-bold">이미 작성 및 출력된 모든 문서를 날짜순으로 관리합니다.</p>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                        {transmittals.length > 0 ? (
+                            transmittals.map((t, i) => (
+                                <div key={t.id} className="flex items-center justify-between p-6 hover:bg-gray-50 transition group">
+                                    <div className="flex items-center gap-4 text-left">
+                                        <div className="text-[10px] font-black text-gray-400 w-20">
+                                            {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : '2026.03.19'}
+                                        </div>
+                                        <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-lg shadow-inner">📄</div>
+                                        <div>
+                                            <h4 className="font-black text-gray-800 text-sm">{t.title}</h4>
+                                            <p className="text-[10px] text-indigo-400 font-black mt-0.5">{t.docNo}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={() => t.gdocUrl && window.open(t.gdocUrl, '_blank')}
+                                            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black hover:bg-slate-200 transition"
+                                        >
+                                            열기
+                                        </button>
+                                        <button 
+                                            onClick={() => router.push(`/documents/workshop/${t.id}`)}
+                                            className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black hover:bg-indigo-700 transition"
+                                        >
+                                            워크숍
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="p-20 text-center text-gray-300 font-bold">출력된 문서가 없습니다.</div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 
